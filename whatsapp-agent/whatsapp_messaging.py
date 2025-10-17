@@ -260,30 +260,22 @@ def attach_files_to_whatsapp(driver, file_paths, send_as_document=True):
         if not file_input:
             debug_logger.error("  -> Could not find file input element")
             return False
-        
-        # Send files one at a time (WhatsApp Web doesn't support multiple files at once)
-        for i, file_path in enumerate(file_paths):
-            # Convert to absolute path if needed
-            abs_path = os.path.abspath(file_path) if not os.path.isabs(file_path) else file_path
-            debug_logger.debug(f"  -> Attaching file {i+1}/{len(file_paths)}: {abs_path}")
-            file_input.send_keys(abs_path)
-            time.sleep(1)  # Wait between files
-            
-            # After first file, need to find file input again for subsequent files
-            if i < len(file_paths) - 1:
-                time.sleep(1)
-                # Find file input again for next file
-                for selector in file_input_selectors:
-                    try:
-                        file_input = driver.find_element(By.XPATH, selector)
-                        debug_logger.debug(f"  -> Found file input for next file")
-                        break
-                    except:
-                        continue
-        
+
+        # Convert all paths to absolute paths
+        abs_paths = [os.path.abspath(fp) if not os.path.isabs(fp) else fp for fp in file_paths]
+
+        # Send all files at once for media grouping (WhatsApp Web supports multiple files with newline separator)
+        # This creates a media album when sending images
+        all_paths_string = "\n".join(abs_paths)
+        debug_logger.debug(f"  -> Attaching {len(file_paths)} file(s) as {'photo album' if not send_as_document else 'documents'}...")
+        for i, path in enumerate(abs_paths):
+            debug_logger.debug(f"  ->   File {i+1}/{len(file_paths)}: {path}")
+
+        file_input.send_keys(all_paths_string)
+
         debug_logger.debug(f"  -> All files attached successfully, waiting for preview to load...")
         time.sleep(3)
-        
+
         return True
         
     except Exception as e:
@@ -570,9 +562,20 @@ def send_followup_messages(worksheet_name, send_col, phone_col, message_col, con
                         
                         if downloaded_files:
                             debug_logger.debug(f"  -> Successfully downloaded {len(downloaded_files)} file(s)")
-                            
-                            # Attach files to WhatsApp (send as documents for full quality)
-                            if not attach_files_to_whatsapp(driver, downloaded_files, send_as_document=True):
+
+                            # Detect file types - if all files are images, send as photos for media grouping
+                            file_types = [attachment_handler.get_file_type(file_path) for file_path in downloaded_files]
+                            all_images = all(ft == 'image' for ft in file_types)
+
+                            if all_images:
+                                debug_logger.debug(f"  -> All files are images, sending as photo album")
+                                send_as_doc = False  # Send as photos to create media group
+                            else:
+                                debug_logger.debug(f"  -> File types: {file_types}, sending as documents")
+                                send_as_doc = True  # Send as documents for full quality or mixed types
+
+                            # Attach files to WhatsApp
+                            if not attach_files_to_whatsapp(driver, downloaded_files, send_as_document=send_as_doc):
                                 debug_logger.error("  -> Failed to attach files, proceeding with text only")
                             else:
                                 # Wait for attachment preview to load
