@@ -101,10 +101,10 @@ def get_user_input_with_timeout(prompt, timeout=10):
             print()  # New line
             return None
 
-def attach_files_to_whatsapp(driver, file_paths, send_as_document=True):
+def attach_files_to_whatsapp(driver, file_paths, send_as_document=False):
     """
     Attach multiple files to WhatsApp message using the attachment button
-    
+
     Args:
         driver: Selenium WebDriver instance
         file_paths: List of local file paths to attach
@@ -197,19 +197,12 @@ def attach_files_to_whatsapp(driver, file_paths, send_as_document=True):
                     debug_logger.debug(f"  -> Document button selector failed: {selector}")
                     continue
         else:
-            # For photos/images, try to find file input directly
-            for selector in file_input_selectors:
-                try:
-                    debug_logger.debug(f"  -> Trying to find file input directly: {selector}")
-                    file_input = driver.find_element(By.XPATH, selector)
-                    debug_logger.debug(f"  -> Found file input directly with selector: {selector}")
-                    break
-                except Exception as e:
-                    debug_logger.debug(f"  -> Direct file input search failed: {selector}")
-                    continue
-            
-            # If file input not found directly, try clicking attachment button first
-            if not file_input:
+            # For photos/images, we MUST click attachment button first, then Photos & Videos
+            # to avoid accidentally using the sticker input
+            file_input = None
+
+            # Always click attachment button first for photos
+            if True:  # Always execute this block for photos
                 debug_logger.debug("  -> File input not found directly, trying to click attachment button...")
                 
                 # Click the attachment (paperclip) button
@@ -217,14 +210,20 @@ def attach_files_to_whatsapp(driver, file_paths, send_as_document=True):
                 
                 # Try different selectors for the attachment button
                 attachment_btn_selectors = [
+                    '//div[@aria-label="Attach"]',
                     '//div[@title="Attach"]',
                     '//span[@data-icon="plus"]',
                     '//span[@data-icon="clip"]',
                     '//span[@data-icon="attach-menu-plus"]',
                     '//button[@aria-label="Attach"]',
-                    '//div[@aria-label="Attach"]',
                     '//span[@data-testid="clip"]',
                     '//div[contains(@class, "attach")]',
+                    '//button[contains(@aria-label, "ttach")]',  # Partial match for "Attach"
+                    '//div[contains(@aria-label, "ttach")]',
+                    '//span[contains(@data-icon, "clip")]',
+                    '//span[contains(@data-icon, "plus")]',
+                    '//*[@data-icon="clip"]',
+                    '//*[@data-icon="plus"]',
                 ]
                 
                 attachment_btn = None
@@ -245,16 +244,39 @@ def attach_files_to_whatsapp(driver, file_paths, send_as_document=True):
                 attachment_btn.click()
                 debug_logger.debug("  -> Clicked attachment button")
                 time.sleep(1)
-                
-                # Now try to find file input again
-                for selector in file_input_selectors:
+
+                # Click on "Photos & Videos" option to ensure we get the right file input (not stickers)
+                photo_video_btn_selectors = [
+                    '//span[@data-icon="image"]',
+                    '//span[@data-icon="photo"]',
+                    '//button[@aria-label="Photos & videos"]',
+                    '//li[@aria-label="Photos & videos"]',
+                    '//input[@accept="image/*,video/mp4,video/3gpp,video/quicktime"]',
+                    '//span[contains(text(), "Photos")]',
+                ]
+
+                for selector in photo_video_btn_selectors:
                     try:
-                        debug_logger.debug(f"  -> Trying file input selector after clicking button: {selector}")
-                        file_input = driver.find_element(By.XPATH, selector)
-                        debug_logger.debug(f"  -> Found file input with selector: {selector}")
-                        break
+                        debug_logger.debug(f"  -> Trying Photos & Videos button selector: {selector}")
+
+                        # Check if it's an input element (direct file input)
+                        if 'input' in selector.lower():
+                            file_input = driver.find_element(By.XPATH, selector)
+                            debug_logger.debug(f"  -> Found photo/video file input with selector: {selector}")
+                            break
+                        else:
+                            # It's a button, click it
+                            photo_btn = driver.find_element(By.XPATH, selector)
+                            photo_btn.click()
+                            debug_logger.debug(f"  -> Clicked Photos & Videos button")
+                            time.sleep(0.5)
+
+                            # Now find the file input for photos
+                            file_input = driver.find_element(By.XPATH, '//input[@accept="image/*,video/mp4,video/3gpp,video/quicktime"]')
+                            debug_logger.debug(f"  -> Found file input after clicking Photos & Videos")
+                            break
                     except Exception as e:
-                        debug_logger.debug(f"  -> File input selector failed: {selector}")
+                        debug_logger.debug(f"  -> Photos & Videos selector failed: {selector}")
                         continue
         
         if not file_input:
@@ -503,7 +525,11 @@ def send_followup_messages(worksheet_name, send_col, phone_col, message_col, con
                     debug_logger.debug(f"Skipping row {index + 2}: Invalid phone number '{phone_number}'")
                     continue
 
-                full_phone_number = f"91{cleaned_number}"
+                # Use number as-is if it starts with country code, otherwise add 91 (India)
+                if len(cleaned_number) > 10:
+                    full_phone_number = cleaned_number  # Already has country code
+                else:
+                    full_phone_number = f"91{cleaned_number}"  # Add India code for legacy compatibility
                 logger.info(f"📱 Sending to +{full_phone_number} ({total_processed}/{len(df)}, retry {retry_count+1}/{max_retries_per_number})")
 
                 # Attempt to send message
@@ -571,8 +597,8 @@ def send_followup_messages(worksheet_name, send_col, phone_col, message_col, con
                         if downloaded_files:
                             debug_logger.debug(f"  -> Successfully downloaded {len(downloaded_files)} file(s)")
                             
-                            # Attach files to WhatsApp (send as documents for full quality)
-                            if not attach_files_to_whatsapp(driver, downloaded_files, send_as_document=True):
+                            # Attach files to WhatsApp (send as photos/images, not documents)
+                            if not attach_files_to_whatsapp(driver, downloaded_files, send_as_document=False):
                                 debug_logger.error("  -> Failed to attach files, proceeding with text only")
                             else:
                                 # Wait for attachment preview to load
