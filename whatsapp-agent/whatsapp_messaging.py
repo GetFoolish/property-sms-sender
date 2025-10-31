@@ -339,7 +339,7 @@ def get_google_sheet():
 
     # Get the instance of the Spreadsheet
     try:
-        sheet = client.open_by_url('https://docs.google.com/spreadsheets/d/1LuOaHtPoJ_FOKPoVLSfLU8pkUeOHt2dOFGBvyJoxnFg/edit?gid=1637417292#gid=1637417292')
+        sheet = client.open_by_url('https://docs.google.com/spreadsheets/d/1TfPYyVRP8xGP_KNM6MmKynJQug0d11NzYhJYdM92vu8/edit?usp=sharing')
         return sheet
     except gspread.exceptions.SpreadsheetNotFound:
         logger.debug("Error: Spreadsheet not found. Please check the URL.")
