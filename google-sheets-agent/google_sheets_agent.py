@@ -33,8 +33,13 @@ def get_google_sheet():
     client = gspread.authorize(creds)
 
     # Get the instance of the Spreadsheet
+    sheet_url = os.getenv('GOOGLE_SHEET_URL')
+    if not sheet_url:
+        print("Error: GOOGLE_SHEET_URL not found in .env file.")
+        return None
+    
     try:
-        sheet = client.open_by_url('https://docs.google.com/spreadsheets/d/1LuOaHtPoJ_FOKPoVLSfLU8pkUeOHt2dOFGBvyJoxnFg/edit?gid=1637417292#gid=1637417292')
+        sheet = client.open_by_url(sheet_url)
         return sheet
     except gspread.exceptions.SpreadsheetNotFound:
         print("Error: Spreadsheet not found. Please check the URL.")
