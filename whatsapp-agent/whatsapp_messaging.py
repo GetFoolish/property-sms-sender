@@ -371,7 +371,7 @@ def send_followup_messages(worksheet_name, send_col, phone_col, message_col, con
             return
         
         # Initialize attachment handler
-        attachment_handler = GDriveAttachmentHandler(cache_dir="./gdrive_cache")
+        attachment_handler = GDriveAttachmentHandler(cache_dir="./gdrive_photos")
         debug_logger.debug("Attachment handler initialized with caching enabled")
 
         worksheet = sheet.worksheet(worksheet_name)
@@ -593,41 +593,65 @@ def send_followup_messages(worksheet_name, send_col, phone_col, message_col, con
                     if attachment_urls:
                         debug_logger.debug("  -> Downloading attachments from Google Drive...")
                         downloaded_files = attachment_handler.download_multiple(attachment_urls)
-                        
+
                         if downloaded_files:
                             debug_logger.debug(f"  -> Successfully downloaded {len(downloaded_files)} file(s)")
-                            
-                            # Attach files to WhatsApp (send as photos/images, not documents)
-                            if not attach_files_to_whatsapp(driver, downloaded_files, send_as_document=False):
-                                debug_logger.error("  -> Failed to attach files, proceeding with text only")
+
+                            # Attach ALL files at once to send as album
+                            file_paths_str = [str(f) for f in downloaded_files]
+                            if not attach_files_to_whatsapp(driver, file_paths_str, send_as_document=False):
+                                debug_logger.error("  -> Failed to attach files, will continue to send text...")
                             else:
-                                # Wait for attachment preview to load
-                                debug_logger.debug("  -> Waiting for attachment preview to load...")
-                                time.sleep(3)  # Increased wait time
-                                
-                                # After attaching files, find the caption/message input field
-                                # Try multiple selectors for the caption field
-                                caption_selectors = [
-                                    '//div[@contenteditable="true"][@data-tab="10"]',
-                                    '//div[@contenteditable="true"][@role="textbox"]',
-                                    '//div[contains(@class, "copyable-text")][@contenteditable="true"]',
-                                    '//*[@id="app"]//footer//div[@contenteditable="true"]',
+                                debug_logger.debug(f"  -> All {len(downloaded_files)} photos attached, waiting for preview...")
+                                time.sleep(3)
+
+                                # Send all photos together as album (one click)
+                                debug_logger.debug("  -> Sending all photos together as album...")
+                                send_button_selectors = [
+                                    '//span[@data-icon="send"]',
+                                    '//span[@data-icon="wds-ic-send-filled"]',
+                                    '//button[@aria-label="Send"]',
+                                    '//div[@role="button"][@aria-label="Send"]',
                                 ]
-                                
-                                caption_found = False
-                                for selector in caption_selectors:
+
+                                sent = False
+                                for selector in send_button_selectors:
                                     try:
-                                        debug_logger.debug(f"  -> Trying caption field selector: {selector}")
-                                        text_input = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, selector)))
-                                        debug_logger.debug(f"  -> Caption field found with selector: {selector}")
-                                        caption_found = True
+                                        send_btn = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, selector)))
+                                        send_btn.click()
+                                        debug_logger.debug(f"  -> All {len(downloaded_files)} photos sent together as album")
+                                        sent = True
+                                        time.sleep(3)
                                         break
                                     except:
-                                        debug_logger.debug(f"  -> Caption selector failed: {selector}")
                                         continue
-                                
-                                if not caption_found:
-                                    debug_logger.warning("  -> Could not find caption field, message may not be added to attachment")
+
+                                if not sent:
+                                    debug_logger.error("  -> Failed to send photos")
+
+                            debug_logger.debug("  -> Photos sent, now will send text message")
+
+                            # After sending all files, need to find text input again (DOM changed)
+                            time.sleep(2)
+                            text_input_selectors = [
+                                '//div[@contenteditable="true"][@data-tab="10"]',
+                                '//div[@contenteditable="true"][@role="textbox"]',
+                                '//div[@title="Type a message"]',
+                                '//div[contains(@class, "copyable-text")][@contenteditable="true"]',
+                                '//*[@id="main"]/footer//div[@contenteditable="true"]',
+                            ]
+
+                            text_input = None
+                            for selector in text_input_selectors:
+                                try:
+                                    text_input = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, selector)))
+                                    debug_logger.debug(f"  -> Found text input for message: {selector}")
+                                    break
+                                except:
+                                    continue
+
+                            if not text_input:
+                                debug_logger.warning("  -> Could not find text input after sending files")
                         else:
                             debug_logger.warning("  -> No files downloaded, sending text only")
 
@@ -657,42 +681,41 @@ def send_followup_messages(worksheet_name, send_col, phone_col, message_col, con
 
                     # Send message (skip testing prompts for automation)
                     if not testing:
-                        debug_logger.debug("  -> Looking for send button...")
-                        
-                        # If attachments were added, need to click the send button instead of pressing RETURN
-                        if attachment_urls and downloaded_files:
-                            # Try to find and click the send button
-                            send_button_selectors = [
-                                '//span[@data-icon="wds-ic-send-filled"]',
-                                '//span[@data-icon="send"]',
-                                '//button[@aria-label="Send"]',
-                                '//span[@data-testid="send"]',
-                                '//div[@role="button"][@aria-label="Send"]',
-                            ]
-                            
-                            send_button_found = False
-                            for selector in send_button_selectors:
-                                try:
-                                    debug_logger.debug(f"  -> Trying send button selector: {selector}")
-                                    send_button = wait.until(EC.element_to_be_clickable((By.XPATH, selector)))
-                                    send_button.click()
-                                    debug_logger.debug(f"  -> Clicked send button with selector: {selector}")
-                                    send_button_found = True
-                                    break
-                                except Exception as e:
-                                    debug_logger.debug(f"  -> Send button selector failed: {selector}")
-                                    continue
-                            
-                            if not send_button_found:
-                                # Fallback to pressing RETURN
-                                debug_logger.debug("  -> Send button not found, trying RETURN key...")
+                        debug_logger.debug("  -> Looking for send button to send text message...")
+
+                        # Try to find and click the send button
+                        send_button_selectors = [
+                            '//span[@data-icon="send"]',
+                            '//span[@data-icon="wds-ic-send-filled"]',
+                            '//button[@aria-label="Send"]',
+                            '//span[@data-testid="send"]',
+                            '//div[@role="button"][@aria-label="Send"]',
+                        ]
+
+                        send_button_found = False
+                        for selector in send_button_selectors:
+                            try:
+                                debug_logger.debug(f"  -> Trying send button selector: {selector}")
+                                send_button = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, selector)))
+                                send_button.click()
+                                debug_logger.debug(f"  -> Text message sent with button: {selector}")
+                                send_button_found = True
+                                break
+                            except Exception as e:
+                                debug_logger.debug(f"  -> Send button selector failed: {selector}")
+                                continue
+
+                        if not send_button_found:
+                            # Fallback to pressing RETURN
+                            debug_logger.debug("  -> Send button not found, trying RETURN key...")
+                            if text_input:
                                 text_input.send_keys(Keys.RETURN)
-                        else:
-                            # No attachments, just press RETURN
-                            debug_logger.debug("  -> Pressing send button (RETURN key)...")
-                            text_input.send_keys(Keys.RETURN)
-                        
-                        time.sleep(2)
+                                debug_logger.debug("  -> Text message sent with RETURN key")
+                            else:
+                                debug_logger.error("  -> Could not send text - no send button or text input found")
+
+                        # Wait longer to ensure message is sent before closing browser
+                        time.sleep(3)
                         debug_logger.debug("  -> Message sent successfully")
 
                         # Update success
