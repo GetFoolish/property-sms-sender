@@ -74,3 +74,5 @@ screenshots/
 *.jpg
 *.jpeg
 *.gif
+# Personal development notes
+DEV_NOTES.md
